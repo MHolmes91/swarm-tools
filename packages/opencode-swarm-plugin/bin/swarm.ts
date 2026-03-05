@@ -100,6 +100,12 @@ import {
   getObservabilityHealth,
   formatHealthDashboard,
 } from "../src/observability-health.js";
+import {
+  buildModelOptionsFromDiscovered,
+  getOpenCodeModelStatePath,
+  parsePersistedModelState,
+  parseDiscoveredModels,
+} from "../src/model-discovery.js";
 
 // Eval tools
 import { getPhase, getScoreHistory, recordEvalRun, getEvalHistoryPath } from "../src/eval-history.js";
@@ -527,6 +533,72 @@ const WORKER_MODELS: ModelOption[] = [
     hint: "Fast and capable",
   },
 ];
+
+const LITE_MODELS: ModelOption[] = [
+  {
+    value: "anthropic/claude-haiku-4-5",
+    label: "Claude Haiku 4.5",
+    hint: "Fast and cost-effective (recommended)",
+  },
+  {
+    value: "anthropic/claude-sonnet-4-5",
+    label: "Claude Sonnet 4.5",
+    hint: "More capable, slower",
+  },
+  {
+    value: "openai/gpt-4o-mini",
+    label: "GPT-4o Mini",
+    hint: "Fast and cheap",
+  },
+  {
+    value: "google/gemini-2.0-flash",
+    label: "Gemini 2.0 Flash",
+    hint: "Fast and capable",
+  },
+];
+
+async function discoverOpenCodeModels(): Promise<string[]> {
+  return new Promise((resolve) => {
+    try {
+      const proc = spawn("opencode", ["models"], {
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+
+      let stdout = "";
+      proc.stdout?.on("data", (data) => {
+        stdout += data.toString();
+      });
+
+      proc.on("error", () => {
+        resolve([]);
+      });
+
+      proc.on("close", (exitCode) => {
+        if (exitCode !== 0) {
+          resolve([]);
+          return;
+        }
+        resolve(parseDiscoveredModels(stdout));
+      });
+    } catch {
+      resolve([]);
+    }
+  });
+}
+
+function discoverModelPreferences(): { favoriteModels: string[]; recentModels: string[] } {
+  try {
+    const modelStatePath = getOpenCodeModelStatePath(process.env, homedir());
+    if (!existsSync(modelStatePath)) {
+      return { favoriteModels: [], recentModels: [] };
+    }
+
+    const raw = readFileSync(modelStatePath, "utf-8");
+    return parsePersistedModelState(raw);
+  } catch {
+    return { favoriteModels: [], recentModels: [] };
+  }
+}
 
 // ============================================================================
 // Update Checking
@@ -2109,6 +2181,33 @@ async function setup(forceReinstall = false, nonInteractive = false) {
   }
   p.log.success(`Bun v${bunCheck.version} detected`);
 
+  const modelDiscoverySpinner = p.spinner();
+  modelDiscoverySpinner.start("Discovering available models...");
+  const discoveredModels = await discoverOpenCodeModels();
+  if (discoveredModels.length > 0) {
+    modelDiscoverySpinner.stop(`Discovered ${discoveredModels.length} models from OpenCode`);
+  } else {
+    modelDiscoverySpinner.stop("Could not discover models (using configured defaults)");
+  }
+
+  const persistedModelState = discoverModelPreferences();
+
+  const coordinatorOptions = buildModelOptionsFromDiscovered(
+    discoveredModels,
+    COORDINATOR_MODELS,
+    persistedModelState,
+  );
+  const workerOptions = buildModelOptionsFromDiscovered(
+    discoveredModels,
+    WORKER_MODELS,
+    persistedModelState,
+  );
+  const liteOptions = buildModelOptionsFromDiscovered(
+    discoveredModels,
+    LITE_MODELS,
+    persistedModelState,
+  );
+
   // Migrate legacy database if present (do this first, before config check)
   const cwd = process.cwd();
   const tempDirName = getLibSQLProjectTempDirName(cwd);
@@ -2208,10 +2307,15 @@ async function setup(forceReinstall = false, nonInteractive = false) {
 
     if (action === "models") {
       // Quick model update flow
+      const quickCoordinatorDefault = coordinatorOptions.some(
+        (opt) => opt.value === "anthropic/claude-sonnet-4-5",
+      )
+        ? "anthropic/claude-sonnet-4-5"
+        : coordinatorOptions[0]?.value;
       const coordinatorModel = await p.select({
         message: "Select coordinator model:",
-        options: COORDINATOR_MODELS,
-        initialValue: "anthropic/claude-sonnet-4-5",
+        options: coordinatorOptions,
+        initialValue: quickCoordinatorDefault,
       });
 
       if (p.isCancel(coordinatorModel)) {
@@ -2219,10 +2323,15 @@ async function setup(forceReinstall = false, nonInteractive = false) {
         process.exit(0);
       }
 
+      const quickWorkerDefault = workerOptions.some(
+        (opt) => opt.value === "anthropic/claude-haiku-4-5",
+      )
+        ? "anthropic/claude-haiku-4-5"
+        : workerOptions[0]?.value;
       const workerModel = await p.select({
         message: "Select worker model:",
-        options: WORKER_MODELS,
-        initialValue: "anthropic/claude-haiku-4-5",
+        options: workerOptions,
+        initialValue: quickWorkerDefault,
       });
 
       if (p.isCancel(workerModel)) {
@@ -2547,44 +2656,10 @@ async function setup(forceReinstall = false, nonInteractive = false) {
 
     const selectedCoordinator = await p.select({
       message: "Select coordinator model (for orchestration/planning):",
-      options: [
-        {
-          value: "anthropic/claude-opus-4-5",
-          label: "Claude Opus 4.5",
-          hint: "Most capable, best for complex orchestration (recommended)",
-        },
-        {
-          value: "anthropic/claude-sonnet-4-5",
-          label: "Claude Sonnet 4.5",
-          hint: "Good balance of speed and capability",
-        },
-        {
-          value: "anthropic/claude-haiku-4-5",
-          label: "Claude Haiku 4.5",
-          hint: "Fast and cost-effective",
-        },
-        {
-          value: "openai/gpt-4o",
-          label: "GPT-4o",
-          hint: "Fast, good for most tasks",
-        },
-        {
-          value: "openai/gpt-4-turbo",
-          label: "GPT-4 Turbo",
-          hint: "Powerful, more expensive",
-        },
-        {
-          value: "google/gemini-2.0-flash",
-          label: "Gemini 2.0 Flash",
-          hint: "Fast and capable",
-        },
-        {
-          value: "google/gemini-1.5-pro",
-          label: "Gemini 1.5 Pro",
-          hint: "More capable",
-        },
-      ],
-      initialValue: DEFAULT_COORDINATOR,
+      options: coordinatorOptions,
+      initialValue: coordinatorOptions.some((opt) => opt.value === DEFAULT_COORDINATOR)
+        ? DEFAULT_COORDINATOR
+        : coordinatorOptions[0]?.value,
     });
 
     if (p.isCancel(selectedCoordinator)) {
@@ -2595,44 +2670,10 @@ async function setup(forceReinstall = false, nonInteractive = false) {
 
     const selectedWorker = await p.select({
       message: "Select worker model (for task execution):",
-      options: [
-        {
-          value: "anthropic/claude-sonnet-4-5",
-          label: "Claude Sonnet 4.5",
-          hint: "Best balance of speed and capability (recommended)",
-        },
-        {
-          value: "anthropic/claude-haiku-4-5",
-          label: "Claude Haiku 4.5",
-          hint: "Fast and cost-effective",
-        },
-        {
-          value: "anthropic/claude-opus-4-5",
-          label: "Claude Opus 4.5",
-          hint: "Most capable, slower",
-        },
-        {
-          value: "openai/gpt-4o",
-          label: "GPT-4o",
-          hint: "Fast, good for most tasks",
-        },
-        {
-          value: "openai/gpt-4-turbo",
-          label: "GPT-4 Turbo",
-          hint: "Powerful, more expensive",
-        },
-        {
-          value: "google/gemini-2.0-flash",
-          label: "Gemini 2.0 Flash",
-          hint: "Fast and capable",
-        },
-        {
-          value: "google/gemini-1.5-pro",
-          label: "Gemini 1.5 Pro",
-          hint: "More capable",
-        },
-      ],
-      initialValue: DEFAULT_WORKER,
+      options: workerOptions,
+      initialValue: workerOptions.some((opt) => opt.value === DEFAULT_WORKER)
+        ? DEFAULT_WORKER
+        : workerOptions[0]?.value,
     });
 
     if (p.isCancel(selectedWorker)) {
@@ -2644,29 +2685,10 @@ async function setup(forceReinstall = false, nonInteractive = false) {
     // Lite model selection for simple tasks (docs, tests)
     const selectedLite = await p.select({
       message: "Select lite model (for docs, tests, simple edits):",
-      options: [
-        {
-          value: "anthropic/claude-haiku-4-5",
-          label: "Claude Haiku 4.5",
-          hint: "Fast and cost-effective (recommended)",
-        },
-        {
-          value: "anthropic/claude-sonnet-4-5",
-          label: "Claude Sonnet 4.5",
-          hint: "More capable, slower",
-        },
-        {
-          value: "openai/gpt-4o-mini",
-          label: "GPT-4o Mini",
-          hint: "Fast and cheap",
-        },
-        {
-          value: "google/gemini-2.0-flash",
-          label: "Gemini 2.0 Flash",
-          hint: "Fast and capable",
-        },
-      ],
-      initialValue: DEFAULT_LITE,
+      options: liteOptions,
+      initialValue: liteOptions.some((opt) => opt.value === DEFAULT_LITE)
+        ? DEFAULT_LITE
+        : liteOptions[0]?.value,
     });
 
     if (p.isCancel(selectedLite)) {
