@@ -192,6 +192,38 @@ READ-ONLY research agent. Never modifies code - only gathers intel and stores fi
   });
 });
 
+describe("Model update helpers", () => {
+  function updateLiteModelFallbackInPluginWrapper(content: string, liteModel: string): string {
+    const withPlaceholder = content.replace(/__SWARM_LITE_MODEL__/g, liteModel);
+    return withPlaceholder.replace(
+      /const liteModel = process\.env\.OPENCODE_LITE_MODEL \|\| ["'][^"']+["'];/,
+      `const liteModel = process.env.OPENCODE_LITE_MODEL || "${liteModel}";`,
+    );
+  }
+
+  test("updates plugin wrapper lite fallback in existing line", () => {
+    const content =
+      'const liteModel = process.env.OPENCODE_LITE_MODEL || "anthropic/claude-haiku-4-5";';
+
+    const updated = updateLiteModelFallbackInPluginWrapper(content, "openai/gpt-5-mini");
+
+    expect(updated).toBe(
+      'const liteModel = process.env.OPENCODE_LITE_MODEL || "openai/gpt-5-mini";',
+    );
+  });
+
+  test("replaces placeholder fallback for generated wrapper content", () => {
+    const content =
+      'const liteModel = process.env.OPENCODE_LITE_MODEL || "__SWARM_LITE_MODEL__";';
+
+    const updated = updateLiteModelFallbackInPluginWrapper(content, "opencode/gpt-5-nano");
+
+    expect(updated).toBe(
+      'const liteModel = process.env.OPENCODE_LITE_MODEL || "opencode/gpt-5-nano";',
+    );
+  });
+});
+
 // ============================================================================
 // Log Command Tests (TDD)
 // ============================================================================
@@ -2301,4 +2333,3 @@ describe("swarm db repair", () => {
     });
   });
 });
-

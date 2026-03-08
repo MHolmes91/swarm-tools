@@ -481,6 +481,14 @@ const DEFAULT_COORDINATOR = "anthropic/claude-opus-4-5";
 const DEFAULT_WORKER = "anthropic/claude-sonnet-4-5";
 const DEFAULT_LITE = "anthropic/claude-haiku-4-5";
 
+function updateLiteModelFallbackInPluginWrapper(content: string, liteModel: string): string {
+  const withPlaceholder = content.replace(/__SWARM_LITE_MODEL__/g, liteModel);
+  return withPlaceholder.replace(
+    /const liteModel = process\.env\.OPENCODE_LITE_MODEL \|\| ["'][^"']+["'];/,
+    `const liteModel = process.env.OPENCODE_LITE_MODEL || "${liteModel}";`,
+  );
+}
+
 async function discoverOpenCodeModels(): Promise<string[]> {
   return new Promise((resolve) => {
     try {
@@ -2257,6 +2265,22 @@ async function setup(forceReinstall = false, nonInteractive = false) {
         process.exit(0);
       }
 
+      const quickLiteDefault = liteOptions.some(
+        (opt) => opt.value === DEFAULT_LITE,
+      )
+        ? DEFAULT_LITE
+        : liteOptions[0]?.value;
+      const liteModel = await p.select({
+        message: "Select lite model:",
+        options: liteOptions,
+        initialValue: quickLiteDefault,
+      });
+
+      if (p.isCancel(liteModel)) {
+        p.cancel("Setup cancelled");
+        process.exit(0);
+      }
+
       // Update model lines in agent files (check both nested and legacy paths)
       const plannerPaths = [plannerAgentPath, legacyPlannerPath].filter(existsSync);
       const workerPaths = [workerAgentPath, legacyWorkerPath].filter(existsSync);
@@ -2283,6 +2307,16 @@ async function setup(forceReinstall = false, nonInteractive = false) {
       }
       if (workerPaths.length > 0) {
         p.log.success("Worker: " + workerModel);
+      }
+
+      if (existsSync(pluginPath)) {
+        const pluginContent = readFileSync(pluginPath, "utf-8");
+        const updatedPlugin = updateLiteModelFallbackInPluginWrapper(
+          pluginContent,
+          liteModel,
+        );
+        writeFileSync(pluginPath, updatedPlugin);
+        p.log.success("Lite: " + liteModel);
       }
 
       p.outro("Models updated! Your customizations are preserved.");
@@ -2642,7 +2676,7 @@ async function setup(forceReinstall = false, nonInteractive = false) {
 
   // Write plugin and command files
   p.log.step("Writing configuration files...");
-  const pluginContent = getPluginWrapper().replace(/__SWARM_LITE_MODEL__/g, liteModel);
+  const pluginContent = updateLiteModelFallbackInPluginWrapper(getPluginWrapper(), liteModel);
   stats[writeFileWithStatus(pluginPath, pluginContent, "Plugin")]++;
   stats[writeFileWithStatus(commandPath, SWARM_COMMAND, "Command")]++;
 
