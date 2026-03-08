@@ -5,7 +5,6 @@ import {
   parsePersistedModelState,
   parseDiscoveredModels,
   rankDiscoveredModels,
-  type ModelOption,
 } from "./model-discovery";
 
 describe("parseDiscoveredModels", () => {
@@ -43,7 +42,7 @@ describe("parseDiscoveredModels", () => {
 });
 
 describe("rankDiscoveredModels", () => {
-  test("orders configured first, then favorites, recents, and others", () => {
+  test("orders favorites first, then recents, then others", () => {
     const discovered = [
       "openai/gpt-5.3-codex",
       "opencode/gpt-5-nano",
@@ -51,24 +50,19 @@ describe("rankDiscoveredModels", () => {
       "google/gemini-2.0-flash",
       "openai/gpt-5.3-codex-spark",
     ];
-    const configuredModels = [
-      "anthropic/claude-sonnet-4-5",
-      "openai/gpt-5.3-codex",
-    ];
     const favoriteModels = ["google/gemini-2.0-flash"];
     const recentModels = ["opencode/gpt-5-nano"];
 
     expect(
       rankDiscoveredModels(discovered, {
-        configuredModels,
         favoriteModels,
         recentModels,
       }),
     ).toEqual([
-      "openai/gpt-5.3-codex",
-      "anthropic/claude-sonnet-4-5",
       "google/gemini-2.0-flash",
       "opencode/gpt-5-nano",
+      "openai/gpt-5.3-codex",
+      "anthropic/claude-sonnet-4-5",
       "openai/gpt-5.3-codex-spark",
     ]);
   });
@@ -82,14 +76,13 @@ describe("rankDiscoveredModels", () => {
 
     expect(
       rankDiscoveredModels(discovered, {
-        configuredModels: ["openai/gpt-5.3-codex", "opencode/gpt-5-nano"],
         favoriteModels: ["opencode/gpt-5-nano", "anthropic/claude-sonnet-4-5"],
         recentModels: ["anthropic/claude-sonnet-4-5"],
       }),
     ).toEqual([
-      "openai/gpt-5.3-codex",
       "opencode/gpt-5-nano",
       "anthropic/claude-sonnet-4-5",
+      "openai/gpt-5.3-codex",
     ]);
   });
 });
@@ -149,50 +142,42 @@ describe("getOpenCodeModelStatePath", () => {
 });
 
 describe("buildModelOptionsFromDiscovered", () => {
-  const configuredOptions: ModelOption[] = [
-    {
-      value: "anthropic/claude-sonnet-4-5",
-      label: "Claude Sonnet 4.5",
-      hint: "Configured",
-    },
-    {
-      value: "openai/gpt-5.3-codex",
-      label: "GPT-5.3 Codex",
-      hint: "Configured",
-    },
+  const fallbackModels: string[] = [
+    "anthropic/claude-sonnet-4-5",
+    "openai/gpt-5.3-codex",
   ];
 
-  test("uses configured labels for matched models and keeps discovered order", () => {
+  test("builds discovered model options and sorts using persisted metadata", () => {
     const discovered = [
       "openai/gpt-5.3-codex",
       "opencode/gpt-5-nano",
       "anthropic/claude-sonnet-4-5",
     ];
 
-    const result = buildModelOptionsFromDiscovered(discovered, configuredOptions, {
+    const result = buildModelOptionsFromDiscovered(discovered, {
       favoriteModels: [],
       recentModels: [],
     });
 
     expect(result.map((x) => x.value)).toEqual([
       "openai/gpt-5.3-codex",
-      "anthropic/claude-sonnet-4-5",
       "opencode/gpt-5-nano",
+      "anthropic/claude-sonnet-4-5",
     ]);
-    expect(result[0].label).toBe("GPT-5.3 Codex");
-    expect(result[1].label).toBe("Claude Sonnet 4.5");
-    expect(result[2].label).toBe("opencode/gpt-5-nano");
+    expect(result[0].label).toBe("openai/gpt-5.3-codex");
+    expect(result[1].label).toBe("opencode/gpt-5-nano");
+    expect(result[2].label).toBe("anthropic/claude-sonnet-4-5");
   });
 
-  test("falls back to configured options when discovery is empty", () => {
-    const result = buildModelOptionsFromDiscovered([], configuredOptions, {
+  test("falls back to fallback models when discovery is empty", () => {
+    const result = buildModelOptionsFromDiscovered([], {
       favoriteModels: [],
       recentModels: [],
-    });
-    expect(result).toEqual(configuredOptions);
+    }, fallbackModels);
+    expect(result.map((x) => x.value)).toEqual(fallbackModels);
   });
 
-  test("respects favorite and recent ordering after configured matches", () => {
+  test("uses exact favorite and recent hint strings with favorite precedence", () => {
     const discovered = [
       "openai/gpt-5.3-codex",
       "google/gemini-2.0-flash",
@@ -200,16 +185,20 @@ describe("buildModelOptionsFromDiscovered", () => {
       "anthropic/claude-sonnet-4-5",
     ];
 
-    const result = buildModelOptionsFromDiscovered(discovered, configuredOptions, {
-      favoriteModels: ["google/gemini-2.0-flash"],
-      recentModels: ["opencode/gpt-5-nano"],
+    const result = buildModelOptionsFromDiscovered(discovered, {
+      favoriteModels: ["google/gemini-2.0-flash", "opencode/gpt-5-nano"],
+      recentModels: ["opencode/gpt-5-nano", "anthropic/claude-sonnet-4-5"],
     });
 
     expect(result.map((x) => x.value)).toEqual([
-      "openai/gpt-5.3-codex",
-      "anthropic/claude-sonnet-4-5",
       "google/gemini-2.0-flash",
       "opencode/gpt-5-nano",
+      "anthropic/claude-sonnet-4-5",
+      "openai/gpt-5.3-codex",
     ]);
+    expect(result[0].hint).toBe("Favorite - Discovered from opencode models");
+    expect(result[1].hint).toBe("Favorite - Discovered from opencode models");
+    expect(result[2].hint).toBe("Recent - Discovered from opencode models");
+    expect(result[3].hint).toBe("Discovered from opencode models");
   });
 });

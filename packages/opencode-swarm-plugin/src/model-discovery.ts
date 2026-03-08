@@ -12,7 +12,6 @@ export interface PersistedModelState {
 }
 
 interface RankOptions {
-  configuredModels: string[];
   favoriteModels: string[];
   recentModels: string[];
 }
@@ -96,10 +95,8 @@ function normalizePersistedModelList(
 }
 
 export function rankDiscoveredModels(discovered: string[], options: RankOptions): string[] {
-  const configured = new Set(options.configuredModels);
   const favorites = new Set(options.favoriteModels);
   const recents = new Set(options.recentModels);
-  const matched: string[] = [];
   const favorite: string[] = [];
   const recent: string[] = [];
   const other: string[] = [];
@@ -109,10 +106,6 @@ export function rankDiscoveredModels(discovered: string[], options: RankOptions)
     if (seen.has(model)) continue;
     seen.add(model);
 
-    if (configured.has(model)) {
-      matched.push(model);
-      continue;
-    }
     if (favorites.has(model)) {
       favorite.push(model);
       continue;
@@ -124,32 +117,36 @@ export function rankDiscoveredModels(discovered: string[], options: RankOptions)
     other.push(model);
   }
 
-  return [...matched, ...favorite, ...recent, ...other];
+  return [...favorite, ...recent, ...other];
 }
 
 export function buildModelOptionsFromDiscovered(
   discovered: string[],
-  configuredOptions: ModelOption[],
   persisted: PersistedModelState,
+  fallbackModels: string[] = [],
 ): ModelOption[] {
-  if (discovered.length === 0) {
-    return configuredOptions;
-  }
-
-  const byValue = new Map(configuredOptions.map((opt) => [opt.value, opt]));
-  const ranked = rankDiscoveredModels(
-    discovered,
-    {
-      configuredModels: configuredOptions.map((opt) => opt.value),
-      favoriteModels: persisted.favoriteModels,
-      recentModels: persisted.recentModels,
-    },
-  );
+  const sourceModels = discovered.length > 0 ? discovered : fallbackModels;
+  const ranked = rankDiscoveredModels(sourceModels, {
+    favoriteModels: persisted.favoriteModels,
+    recentModels: persisted.recentModels,
+  });
+  const favorites = new Set(persisted.favoriteModels);
+  const recents = new Set(persisted.recentModels);
 
   return ranked.map((model) => {
-    const configured = byValue.get(model);
-    if (configured) {
-      return configured;
+    if (favorites.has(model)) {
+      return {
+        value: model,
+        label: model,
+        hint: "Favorite - Discovered from opencode models",
+      };
+    }
+    if (recents.has(model)) {
+      return {
+        value: model,
+        label: model,
+        hint: "Recent - Discovered from opencode models",
+      };
     }
     return {
       value: model,

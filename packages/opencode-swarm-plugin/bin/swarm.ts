@@ -477,85 +477,9 @@ function getDecoratedBee(): string {
 // Model Configuration
 // ============================================================================
 
-interface ModelOption {
-  value: string;
-  label: string;
-  hint: string;
-}
-
-const COORDINATOR_MODELS: ModelOption[] = [
-  {
-    value: "anthropic/claude-sonnet-4-5",
-    label: "Claude Sonnet 4.5",
-    hint: "Best balance of speed and capability (recommended)",
-  },
-  {
-    value: "anthropic/claude-opus-4-5",
-    label: "Claude Opus 4.5",
-    hint: "Most capable, slower and more expensive",
-  },
-  {
-    value: "openai/gpt-4o",
-    label: "GPT-4o",
-    hint: "Fast, good for most tasks",
-  },
-  {
-    value: "google/gemini-2.0-flash",
-    label: "Gemini 2.0 Flash",
-    hint: "Fast and capable",
-  },
-  {
-    value: "google/gemini-1.5-pro",
-    label: "Gemini 1.5 Pro",
-    hint: "More capable, larger context",
-  },
-];
-
-const WORKER_MODELS: ModelOption[] = [
-  {
-    value: "anthropic/claude-haiku-4-5",
-    label: "Claude Haiku 4.5",
-    hint: "Fast and cost-effective (recommended)",
-  },
-  {
-    value: "anthropic/claude-sonnet-4-5",
-    label: "Claude Sonnet 4.5",
-    hint: "More capable, slower",
-  },
-  {
-    value: "openai/gpt-4o-mini",
-    label: "GPT-4o Mini",
-    hint: "Fast and cheap",
-  },
-  {
-    value: "google/gemini-2.0-flash",
-    label: "Gemini 2.0 Flash",
-    hint: "Fast and capable",
-  },
-];
-
-const LITE_MODELS: ModelOption[] = [
-  {
-    value: "anthropic/claude-haiku-4-5",
-    label: "Claude Haiku 4.5",
-    hint: "Fast and cost-effective (recommended)",
-  },
-  {
-    value: "anthropic/claude-sonnet-4-5",
-    label: "Claude Sonnet 4.5",
-    hint: "More capable, slower",
-  },
-  {
-    value: "openai/gpt-4o-mini",
-    label: "GPT-4o Mini",
-    hint: "Fast and cheap",
-  },
-  {
-    value: "google/gemini-2.0-flash",
-    label: "Gemini 2.0 Flash",
-    hint: "Fast and capable",
-  },
-];
+const DEFAULT_COORDINATOR = "anthropic/claude-opus-4-5";
+const DEFAULT_WORKER = "anthropic/claude-sonnet-4-5";
+const DEFAULT_LITE = "anthropic/claude-haiku-4-5";
 
 async function discoverOpenCodeModels(): Promise<string[]> {
   return new Promise((resolve) => {
@@ -2192,21 +2116,15 @@ async function setup(forceReinstall = false, nonInteractive = false) {
 
   const persistedModelState = discoverModelPreferences();
 
-  const coordinatorOptions = buildModelOptionsFromDiscovered(
+  const fallbackModels = [DEFAULT_COORDINATOR, DEFAULT_WORKER, DEFAULT_LITE];
+  const baseModelOptions = buildModelOptionsFromDiscovered(
     discoveredModels,
-    COORDINATOR_MODELS,
     persistedModelState,
+    fallbackModels,
   );
-  const workerOptions = buildModelOptionsFromDiscovered(
-    discoveredModels,
-    WORKER_MODELS,
-    persistedModelState,
-  );
-  const liteOptions = buildModelOptionsFromDiscovered(
-    discoveredModels,
-    LITE_MODELS,
-    persistedModelState,
-  );
+  const coordinatorOptions = baseModelOptions;
+  const workerOptions = baseModelOptions;
+  const liteOptions = baseModelOptions;
 
   // Migrate legacy database if present (do this first, before config check)
   const cwd = process.cwd();
@@ -2631,11 +2549,6 @@ async function setup(forceReinstall = false, nonInteractive = false) {
   } else {
     p.log.message(dim('  No OpenCode config found (skipping MCP check)'));
   }
-
-  // Model defaults: opus for coordinator, sonnet for worker, haiku for lite
-  const DEFAULT_COORDINATOR = "anthropic/claude-opus-4-5";
-  const DEFAULT_WORKER = "anthropic/claude-sonnet-4-5";
-  const DEFAULT_LITE = "anthropic/claude-haiku-4-5";
 
   // Model selection (skip if non-interactive)
   let coordinatorModel: string;
