@@ -10,6 +10,7 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync, existsSync, readFileSync, readdirSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { buildModelOptionsFromDiscovered } from "../src/model-discovery";
 
 type FileStatus = "created" | "updated" | "unchanged";
 
@@ -189,6 +190,80 @@ READ-ONLY research agent. Never modifies code - only gathers intel and stores fi
       
       expect(template).toContain("name: swarm-researcher");
     });
+  });
+});
+
+describe("Setup model option discovery", () => {
+  const DEFAULT_COORDINATOR = "anthropic/claude-opus-4-5";
+  const DEFAULT_WORKER = "anthropic/claude-sonnet-4-5";
+  const DEFAULT_LITE = "anthropic/claude-haiku-4-5";
+
+  function getSetupModelOptions(
+    discoveredModels: string[],
+    persistedModelState: { favoriteModels: string[]; recentModels: string[] },
+  ) {
+    const fallbackModels = [DEFAULT_COORDINATOR, DEFAULT_WORKER, DEFAULT_LITE];
+    const baseModelOptions = buildModelOptionsFromDiscovered(
+      discoveredModels,
+      persistedModelState,
+      fallbackModels,
+    );
+
+    return {
+      coordinatorOptions: baseModelOptions,
+      workerOptions: baseModelOptions,
+      liteOptions: baseModelOptions,
+    };
+  }
+
+  test("uses discovered OpenCode models for every setup role", () => {
+    const discoveredModels = [
+      "openai/gpt-5.3-codex",
+      "opencode/gpt-5-nano",
+      "anthropic/claude-sonnet-4-5",
+    ];
+
+    const result = getSetupModelOptions(discoveredModels, {
+      favoriteModels: ["opencode/gpt-5-nano"],
+      recentModels: ["openai/gpt-5.3-codex"],
+    });
+
+    expect(result.coordinatorOptions).toEqual(result.workerOptions);
+    expect(result.coordinatorOptions).toEqual(result.liteOptions);
+    expect(result.coordinatorOptions.map((option) => option.value)).toEqual([
+      "opencode/gpt-5-nano",
+      "openai/gpt-5.3-codex",
+      "anthropic/claude-sonnet-4-5",
+    ]);
+    expect(result.coordinatorOptions[0]?.hint).toBe(
+      "Favorite - Discovered from opencode models",
+    );
+    expect(result.coordinatorOptions[1]?.hint).toBe(
+      "Recent - Discovered from opencode models",
+    );
+  });
+
+  test("falls back to all setup defaults when discovery is empty", () => {
+    const result = getSetupModelOptions([], {
+      favoriteModels: [],
+      recentModels: [],
+    });
+
+    expect(result.coordinatorOptions.map((option) => option.value)).toEqual([
+      DEFAULT_COORDINATOR,
+      DEFAULT_WORKER,
+      DEFAULT_LITE,
+    ]);
+    expect(result.workerOptions.map((option) => option.value)).toEqual([
+      DEFAULT_COORDINATOR,
+      DEFAULT_WORKER,
+      DEFAULT_LITE,
+    ]);
+    expect(result.liteOptions.map((option) => option.value)).toEqual([
+      DEFAULT_COORDINATOR,
+      DEFAULT_WORKER,
+      DEFAULT_LITE,
+    ]);
   });
 });
 
