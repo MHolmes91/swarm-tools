@@ -2226,9 +2226,9 @@ async function setup(forceReinstall = false, nonInteractive = false) {
     if (action === "models") {
       // Quick model update flow
       const quickCoordinatorDefault = coordinatorOptions.some(
-        (opt) => opt.value === "anthropic/claude-sonnet-4-5",
+        (opt) => opt.value === DEFAULT_COORDINATOR,
       )
-        ? "anthropic/claude-sonnet-4-5"
+        ? DEFAULT_COORDINATOR
         : coordinatorOptions[0]?.value;
       const coordinatorModel = await p.select({
         message: "Select coordinator model:",
@@ -2242,9 +2242,9 @@ async function setup(forceReinstall = false, nonInteractive = false) {
       }
 
       const quickWorkerDefault = workerOptions.some(
-        (opt) => opt.value === "anthropic/claude-haiku-4-5",
+        (opt) => opt.value === DEFAULT_WORKER,
       )
-        ? "anthropic/claude-haiku-4-5"
+        ? DEFAULT_WORKER
         : workerOptions[0]?.value;
       const workerModel = await p.select({
         message: "Select worker model:",
